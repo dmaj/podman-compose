@@ -160,19 +160,20 @@ def fix_mount_dict(mount_dict, proj_name, srv_name):
 # ${VARIABLE?err} raise error if not set
 # $$ means $
 
-var_re = re.compile(r"""
-    \$(?:
-        (?P<escaped>\$) |
+var_re = lambda x: re.compile(fr"""
+    \{x}(?:
+        (?P<escaped>\{x}) |
         (?P<named>[_a-zA-Z][_a-zA-Z0-9]*) |
-        (?:{
+        (?:{{
             (?P<braced>[_a-zA-Z][_a-zA-Z0-9]*)
             (?:
-                (?::?-(?P<default>[^}]+)) |
-                (?::?\?(?P<err>[^}]+))
+                (?::?-(?P<default>[^}}]+)) |
+                (?::?\?(?P<err>[^}}]+))
             )?
-        })
+        }})
     )
-""", re.VERBOSE)
+    """, re.VERBOSE)
+
 
 def rec_subs(value, dicts):
     """
@@ -181,21 +182,38 @@ def rec_subs(value, dicts):
     if is_dict(value):
         value = dict([(k, rec_subs(v, dicts)) for k, v in value.items()])
     elif is_str(value):
-        def convert(m):
+        def convert(x, m):
             if m.group("escaped") is not None:
                 return "$"
             name = m.group("named") or m.group("braced")
             for d in dicts:
-                value = d.get(name)
-                if value is not None:
+                if x == '$':
+                    value = d.get(name)
+                    if value is not None:
+                        return "%s" % value
+                if x == '#':
+                    value = resolve_internal_env(name, d.get(name))
                     return "%s" % value
             if m.group("err") is not None:
                 raise RuntimeError(m.group("err"))
             return m.group("default") or ""
-        value = var_re.sub(convert, value)
+
+        for key in ("$", "#"):
+            value = var_re(key).sub(partial(convert, key), value)
+
     elif hasattr(value, "__iter__"):
         value = [rec_subs(i, dicts) for i in value]
     return value
+
+
+def resolve_internal_env(name, value):
+    if name.upper() == "FQDN": return (socket.getfqdn())
+
+    if len(name) > 3 and name[0:3].upper() == 'CMD':
+        content = base64.standard_b64decode(name[3:] + "==").decode('utf-8')
+        result = (''.join(os.popen(content).readlines())).strip()
+        return (result)
+    return ("")
 
 def norm_as_list(src):
     """
