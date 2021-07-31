@@ -18,7 +18,10 @@ import re
 import hashlib
 import random
 import json
+import socket
+import base64
 
+from functools import partial
 from threading import Thread
 
 import shlex
